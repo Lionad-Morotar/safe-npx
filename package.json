@@ -1,6 +1,6 @@
 {
   "name": "@lionad/safe-npx",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Safe npx wrapper - lock to latest-1 version with 24h cache",
   "type": "module",
   "bin": {

@@ -289,14 +289,14 @@ export async function checkSelfUpdate() {
   try {
     const data = await fetchPackageMetadata(PKG_NAME);
     const latest = data['dist-tags']?.latest;
-    if (!latest) return { hasUpdate: false, currentVersion: '0.2.2', latestVersion: null };
+    if (!latest) return { hasUpdate: false, currentVersion: '0.2.3', latestVersion: null };
 
-    const currentVersion = '0.2.2'; // Should match package.json
+    const currentVersion = '0.2.3'; // Should match package.json
     const hasUpdate = latest !== currentVersion;
 
     return { hasUpdate, currentVersion, latestVersion: latest };
   } catch {
-    return { hasUpdate: false, currentVersion: '0.2.2', latestVersion: null };
+    return { hasUpdate: false, currentVersion: '0.2.3', latestVersion: null };
   }
 }
 
