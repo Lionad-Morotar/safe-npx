@@ -19,7 +19,7 @@
     "supply-chain",
     "cli"
   ],
-  "author": "Lionad",
+  "author": "仿生狮子 <tangnad@qq.com> (https://github.com/Lionad-Morotar)",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
