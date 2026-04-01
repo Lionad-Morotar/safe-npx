@@ -1,0 +1,30 @@
+{
+  "name": "@lionad/safe-npx",
+  "version": "0.1.0",
+  "description": "Safe npx wrapper - lock to latest-1 version with 24h cache",
+  "type": "module",
+  "bin": {
+    "snpx": "snpx.js"
+  },
+  "files": [
+    "snpx.js"
+  ],
+  "scripts": {
+    "test": "vitest run"
+  },
+  "keywords": [
+    "npx",
+    "npm",
+    "security",
+    "supply-chain",
+    "cli"
+  ],
+  "author": "Lionad",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0"
+  }
+}
