@@ -13,13 +13,33 @@ const CACHE_DIR = join(homedir(), '.cache', 'snpx');
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const MIN_AGE_MS = 24 * 60 * 60 * 1000; // 1 day
 const REGISTRY = 'https://registry.npmjs.org';
+const PKG_NAME = '@lionad/safe-npx';
+
+const HELP_TEXT = `
+safe-npx (snpx) - Lock npx to latest-1 version with 24h cache
+
+Usage:
+  snpx [options] <package>@latest [args...]
+  snpx [options] <command>
+
+Options:
+  -h, --help                Show this help message
+  --self-update             Check for snpx updates (safe mode, default)
+  --unsafe-self-update      Allow immediate snpx updates without 24h delay
+
+Examples:
+  snpx -y cowsay@latest "Hello World"
+  snpx --self-update
+
+Note: Only calls containing @latest are intercepted. Other commands pass through to npx directly.
+`.trim();
 
 /**
  * Parse package specifier from argv
  * Returns { pkgSpec: string|null, pkgName: string|null, restArgs: string[] }
  * Only intercepts specs containing '@latest'
  */
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = argv.slice(2);
   let pkgSpec = null;
   let pkgName = null;
@@ -43,7 +63,7 @@ function parseArgs(argv) {
 /**
  * Read cached version if valid
  */
-function getCachedVersion(pkgName) {
+export function getCachedVersion(pkgName) {
   const cacheFile = join(CACHE_DIR, `${pkgName.replace('/', '--')}.json`);
   if (!existsSync(cacheFile)) return null;
 
@@ -62,7 +82,7 @@ function getCachedVersion(pkgName) {
 /**
  * Write version to cache
  */
-function setCachedVersion(pkgName, version) {
+export function setCachedVersion(pkgName, version) {
   mkdirSync(CACHE_DIR, { recursive: true });
   const cacheFile = join(CACHE_DIR, `${pkgName.replace('/', '--')}.json`);
   writeFileSync(cacheFile, JSON.stringify({ version, resolvedAt: Date.now() }));
@@ -71,9 +91,9 @@ function setCachedVersion(pkgName, version) {
 /**
  * Fetch package metadata from registry
  */
-async function fetchPackageMetadata(pkgName) {
+export async function fetchPackageMetadata(pkgName) {
   const url = `${REGISTRY}/${encodeURIComponent(pkgName)}`;
-  const res = await fetch(url, { timeout: 10000 });
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
   if (!res.ok) throw new Error(`Failed to fetch ${pkgName}: ${res.status}`);
   return res.json();
 }
@@ -81,7 +101,7 @@ async function fetchPackageMetadata(pkgName) {
 /**
  * Find latest-1 version that is at least 1 day old
  */
-async function resolveSafeVersion(pkgName) {
+export async function resolveSafeVersion(pkgName) {
   const data = await fetchPackageMetadata(pkgName);
   const latest = data['dist-tags']?.latest;
   if (!latest) throw new Error('No latest tag found');
@@ -110,15 +130,98 @@ async function resolveSafeVersion(pkgName) {
 }
 
 /**
+ * Check if snpx itself has an update available
+ * Returns { hasUpdate: boolean, currentVersion: string, latestVersion: string|null }
+ */
+export async function checkSelfUpdate() {
+  try {
+    const data = await fetchPackageMetadata(PKG_NAME);
+    const latest = data['dist-tags']?.latest;
+    if (!latest) return { hasUpdate: false, currentVersion: '0.1.0', latestVersion: null };
+
+    const currentVersion = '0.1.0'; // Should match package.json
+    const hasUpdate = latest !== currentVersion;
+
+    return { hasUpdate, currentVersion, latestVersion: latest };
+  } catch {
+    return { hasUpdate: false, currentVersion: '0.1.0', latestVersion: null };
+  }
+}
+
+/**
+ * Run npx with proper exit code handling
+ */
+function runNpx(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('npx', args, { stdio: 'inherit' });
+    child.on('close', (code) => {
+      process.exitCode = code ?? 0;
+      resolve();
+    });
+    child.on('error', reject);
+  });
+}
+/**
  * Main entry
  */
 async function main() {
+  const args = process.argv.slice(2);
+
+  // Handle help
+  if (args.includes('-h') || args.includes('--help')) {
+    console.log(HELP_TEXT);
+    return;
+  }
+
+  // Handle self-update check
+  const selfUpdateIndex = args.findIndex(a => a === '--self-update');
+  const unsafeSelfUpdateIndex = args.findIndex(a => a === '--unsafe-self-update');
+
+  if (selfUpdateIndex !== -1 || unsafeSelfUpdateIndex !== -1) {
+    const unsafe = unsafeSelfUpdateIndex !== -1;
+    console.error(`[snpx] Checking for updates${unsafe ? ' (unsafe mode)' : ''}...`);
+
+    try {
+      const { hasUpdate, currentVersion, latestVersion } = await checkSelfUpdate();
+
+      if (!latestVersion) {
+        console.error('[snpx] Could not check for updates. Try again later.');
+        process.exit(1);
+      }
+
+      if (hasUpdate) {
+        console.error(`[snpx] Update available: ${currentVersion} → ${latestVersion}`);
+        console.error('[snpx] Run: npm update -g @lionad/safe-npx');
+
+        if (!unsafe) {
+          // Safe mode: check if latest is 24h old
+          const data = await fetchPackageMetadata(PKG_NAME);
+          const times = data.time || {};
+          const latestTime = times[latestVersion];
+          if (latestTime) {
+            const age = Date.now() - new Date(latestTime).getTime();
+            if (age < MIN_AGE_MS) {
+              console.error(`[snpx] Warning: Latest version is only ${Math.floor(age / 3600000)}h old. Waiting for 24h safety window.`);
+              console.error('[snpx] Use --unsafe-self-update to bypass (not recommended)');
+            }
+          }
+        }
+      } else {
+        console.error(`[snpx] Already up to date (${currentVersion})`);
+      }
+    } catch (err) {
+      console.error(`[snpx] Error checking for updates: ${err.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  // Normal package execution flow
   const { pkgSpec, pkgName, restArgs } = parseArgs(process.argv);
 
   // No @latest found, pass through directly
   if (!pkgSpec || !pkgName) {
-    const args = process.argv.slice(2);
-    spawn('npx', args, { stdio: 'inherit' });
+    await runNpx(args);
     return;
   }
 
@@ -141,7 +244,7 @@ async function main() {
 
   // Replace @latest with @version and spawn npx
   const npxArgs = [`${pkgName}@${version}`, ...restArgs];
-  spawn('npx', npxArgs, { stdio: 'inherit' });
+  await runNpx(npxArgs);
 }
 
 main().catch(err => {

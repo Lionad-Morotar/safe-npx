@@ -24,6 +24,19 @@ snpx -y create-react-app@latest my-app
 snpx -y @vue/cli@latest create my-project
 ```
 
+### Self-update check
+
+```bash
+# Check for snpx updates (safe mode - respects 24h window)
+snpx --self-update
+
+# Bypass safety window (not recommended)
+snpx --unsafe-self-update
+
+# Show help
+snpx --help
+```
+
 ## How it works
 
 1. Intercepts calls containing `@latest`
