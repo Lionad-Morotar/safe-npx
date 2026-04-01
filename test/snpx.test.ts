@@ -179,9 +179,32 @@ describe('snpx', () => {
       expect(() => parseArgs(['node', 'snpx', '--unknown-flag', 'cowsay@latest'])).toThrow('Unknown flag: --unknown-flag');
     });
 
-    it('should throw on --version (not a snpx flag)', async () => {
+    it('should throw on --version before package', async () => {
       const { parseArgs } = await import('../snpx.js');
       expect(() => parseArgs(['node', 'snpx', '--version'])).toThrow('Unknown flag: --version');
+      expect(() => parseArgs(['node', 'snpx', '--version', 'cowsay@latest'])).toThrow('Unknown flag: --version');
+    });
+
+    it('should pass --version through when after package name (two-phase)', async () => {
+      const { parseArgs } = await import('../snpx.js');
+      const result = parseArgs(['node', 'snpx', 'cowsay@latest', '--version']);
+      expect(result.pkgName).toBe('cowsay');
+      expect(result.restArgs).toContain('--version');
+    });
+
+    it('should pass any --flags through when after package name', async () => {
+      const { parseArgs } = await import('../snpx.js');
+      const result = parseArgs(['node', 'snpx', 'cowsay@latest', '--version', '--json', '-l']);
+      expect(result.pkgName).toBe('cowsay');
+      expect(result.restArgs).toEqual(['--version', '--json', '-l']);
+    });
+
+    it('should passthrough non-latest versioned packages', async () => {
+      const { parseArgs } = await import('../snpx.js');
+      const result = parseArgs(['node', 'snpx', 'cowsay@1.0.0', 'hello']);
+      expect(result.pkgSpec).toBeNull();
+      expect(result.pkgName).toBeNull();
+      expect(result.restArgs).toEqual(['cowsay@1.0.0', 'hello']);
     });
 
     it('should pass single-dash flags through to npxArgs', async () => {

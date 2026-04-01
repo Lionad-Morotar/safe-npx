@@ -15,35 +15,45 @@ const DEFAULT_TIME_HOURS = 24;
 const DEFAULT_FALLBACK_STRATEGY = 'patch,minor,major';
 const MS_PER_HOUR = 60 * 60 * 1000;
 
+const _tty = process.stdout.isTTY && !process.env.NO_COLOR;
+const _c = {
+  bold: (s) => _tty ? `\x1b[1m${s}\x1b[22m` : s,
+  dim: (s) => _tty ? `\x1b[2m${s}\x1b[22m` : s,
+  green: (s) => _tty ? `\x1b[32m${s}\x1b[39m` : s,
+  cyan: (s) => _tty ? `\x1b[36m${s}\x1b[39m` : s,
+  yellow: (s) => _tty ? `\x1b[33m${s}\x1b[39m` : s,
+};
+
 const HELP_TEXT = `
-safe-npx (snpx) - Safe npx wrapper with configurable fallback strategy
+${_c.bold(_c.cyan('safe-npx (snpx)'))} — Safe npx wrapper with configurable fallback strategy
 
-Usage:
-  snpx [options] <package>@latest [args...]
-  snpx [options] <package> [args...]
-  snpx [options] <command>
+${_c.bold('Usage:')}
+  ${_c.green('snpx')} [options] <package>@latest [args...]
+  ${_c.green('snpx')} [options] <package> [args...]
+  ${_c.green('snpx')} [options] <command>
 
-Options:
-  -h, --help                Show this help message
-  --time <hours>            Safety window in hours (default: 24)
-  --fallback-strategy <str> Comma-separated fallback order.
+${_c.bold('Options:')}
+  ${_c.yellow('-h, --help')}                Show this help message
+  ${_c.yellow('--time')} ${_c.dim('<hours>')}            Safety window in hours (default: 24)
+  ${_c.yellow('--fallback-strategy')} ${_c.dim('<str>')} Comma-separated fallback order.
                             Default: patch,minor,major
                             Left-to-right: first matching safe version wins.
-                            patch  = version immediately before latest
-                            minor  = most recently published version of previous minor line
-                            major  = most recently published version of previous major line
-  --show-version            Print resolved version and exit (no execution)
-  --self-update             Check for snpx updates (safe mode, default 24h)
-  --unsafe-self-update      Allow immediate snpx updates without safety window
+                            ${_c.dim('patch')}  = version immediately before latest
+                            ${_c.dim('minor')}  = most recently published version of previous minor line
+                            ${_c.dim('major')}  = most recently published version of previous major line
+  ${_c.yellow('--show-version')}            Print resolved version and exit (no execution)
+  ${_c.yellow('--self-update')}             Check for snpx updates (safe mode, default 24h)
+  ${_c.yellow('--unsafe-self-update')}      Allow immediate snpx updates without safety window
 
-Environment Variables:
-  SNPX_TIME                 Default for --time
-  SNPX_FALLBACK_STRATEGY    Default for --fallback-strategy
+${_c.bold('Environment Variables:')}
+  ${_c.green('SNPX_TIME')}                 Default for --time
+  ${_c.green('SNPX_FALLBACK_STRATEGY')}    Default for --fallback-strategy
 
-Examples:
-  snpx -y cowsay@latest "Hello World"
-  snpx --time 48 --fallback-strategy patch,minor cowsay@latest
-  snpx --show-version cowsay@latest
+${_c.bold('Examples:')}
+  ${_c.green('snpx')} -y cowsay@latest "Hello World"
+  ${_c.green('snpx')} --time 48 --fallback-strategy patch,minor cowsay@latest
+  ${_c.green('snpx')} --show-version cowsay@latest
+  ${_c.green('snpx')} cowsay@latest --version               ${_c.dim('# passes --version to cowsay')}
 `.trim();
 
 /**
@@ -64,9 +74,14 @@ export function parseSemver(version) {
 }
 
 /**
- * Parse CLI arguments.
- * Separates snpx-specific flags from npx passthrough arguments.
- * Recognizes both @latest specifiers and bare package names.
+ * Parse CLI arguments using two-phase parsing:
+ *
+ *   Phase 1 (before package): Only snpx flags accepted.
+ *     Unknown --flags → error. Single-dash flags (-y) → npx passthrough.
+ *   Phase 2 (after package): Everything is passthrough to the executed tool.
+ *
+ *   snpx [snpx-flags] <package> [tool-args...]
+ *   snpx [snpx-flags]                (--help, --self-update, etc.)
  */
 export function parseArgs(argv) {
   const args = argv.slice(2);
@@ -78,14 +93,21 @@ export function parseArgs(argv) {
     time: null,
     fallbackStrategy: null,
   };
-  const npxArgs = [];
   let pkgSpec = null;
   let pkgName = null;
-  let sawFirstPositional = false;
+  const restArgs = [];
+  let foundPackage = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
 
+    // Phase 2: after package name, everything is passthrough
+    if (foundPackage) {
+      restArgs.push(arg);
+      continue;
+    }
+
+    // Phase 1: before package, only known snpx flags accepted
     if (arg === '-h' || arg === '--help') {
       snpxFlags.help = true;
     } else if (arg === '--show-version') {
@@ -106,30 +128,32 @@ export function parseArgs(argv) {
       snpxFlags.fallbackStrategy = arg.slice('--fallback-strategy='.length);
     } else if (arg.startsWith('--')) {
       throw new Error(`Unknown flag: ${arg}. Run 'snpx --help' for available options.`);
+    } else if (arg.startsWith('-')) {
+      // Single-dash npx flags (e.g. -y, -p) are always passthrough
+      restArgs.push(arg);
     } else {
-      npxArgs.push(arg);
-      if (!pkgName && !sawFirstPositional) {
-        // Single-dash flags (e.g. -y) skip package detection;
-        // positional args undergo package name matching.
-        if (!arg.startsWith('-')) {
-          sawFirstPositional = true;
-          const latestMatch = arg.match(/^(@[^/]+\/[^@]+|[^@]+)@latest$/);
-          if (latestMatch) {
-            pkgSpec = arg;
-            pkgName = latestMatch[1];
-          } else {
-            const bareMatch = arg.match(/^(@[^/]+\/[^@]+|[^@]+)$/);
-            if (bareMatch) {
-              pkgSpec = arg;
-              pkgName = bareMatch[1];
-            }
-          }
+      // Positional: check if it's a package name
+      const latestMatch = arg.match(/^(@[^/]+\/[^@]+|[^@]+)@latest$/);
+      if (latestMatch) {
+        pkgSpec = arg;
+        pkgName = latestMatch[1];
+        foundPackage = true;
+      } else {
+        const bareMatch = arg.match(/^(@[^/]+\/[^@]+|[^@]+)$/);
+        if (bareMatch) {
+          pkgSpec = arg;
+          pkgName = bareMatch[1];
+          foundPackage = true;
+        } else {
+          // Not a recognized package spec (e.g. pkg@1.0.0).
+          // Stop phase 1; treat this and everything after as npx passthrough.
+          foundPackage = true;
+          restArgs.push(arg);
         }
       }
     }
   }
 
-  const restArgs = npxArgs.filter(a => a !== pkgSpec);
   return { snpxFlags, pkgSpec, pkgName, restArgs, isLatest: !!(pkgSpec && pkgSpec.includes('@latest')) };
 }
 
@@ -265,14 +289,14 @@ export async function checkSelfUpdate() {
   try {
     const data = await fetchPackageMetadata(PKG_NAME);
     const latest = data['dist-tags']?.latest;
-    if (!latest) return { hasUpdate: false, currentVersion: '0.2.1', latestVersion: null };
+    if (!latest) return { hasUpdate: false, currentVersion: '0.2.2', latestVersion: null };
 
-    const currentVersion = '0.2.1'; // Should match package.json
+    const currentVersion = '0.2.2'; // Should match package.json
     const hasUpdate = latest !== currentVersion;
 
     return { hasUpdate, currentVersion, latestVersion: latest };
   } catch {
-    return { hasUpdate: false, currentVersion: '0.2.1', latestVersion: null };
+    return { hasUpdate: false, currentVersion: '0.2.2', latestVersion: null };
   }
 }
 

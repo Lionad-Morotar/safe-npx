@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2025-04-02
+
+### 变更
+- 参数解析重构为两阶段模式：包名前仅接受 snpx 标志，包名后全部透传
+- 帮助文本支持 ANSI 着色（TTY 环境自动启用，尊重 `NO_COLOR`）
+
 ## [0.2.1] - 2025-04-01
 
 ### 安全
