@@ -1,78 +1,148 @@
 #!/usr/bin/env node
 /**
- * safe-npx (snpx) - Lock npx to latest-1 version with 24h cache
- * Inspired by safe-npm: https://github.com/kevinslin/safe-npm
+ * safe-npx (snpx) - Safe npx wrapper with configurable fallback strategy
  */
 
 import { spawn } from 'child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
 const CACHE_DIR = join(homedir(), '.cache', 'snpx');
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const MIN_AGE_MS = 24 * 60 * 60 * 1000; // 1 day
 const REGISTRY = 'https://registry.npmjs.org';
 const PKG_NAME = '@lionad/safe-npx';
+const DEFAULT_TIME_HOURS = 24;
+const DEFAULT_FALLBACK_STRATEGY = 'patch,minor,major';
+const MS_PER_HOUR = 60 * 60 * 1000;
 
 const HELP_TEXT = `
-safe-npx (snpx) - Lock npx to latest-1 version with 24h cache
+safe-npx (snpx) - Safe npx wrapper with configurable fallback strategy
 
 Usage:
   snpx [options] <package>@latest [args...]
+  snpx [options] <package> [args...]
   snpx [options] <command>
 
 Options:
   -h, --help                Show this help message
-  --self-update             Check for snpx updates (safe mode, default)
-  --unsafe-self-update      Allow immediate snpx updates without 24h delay
+  --time <hours>            Safety window in hours (default: 24)
+  --fallback-strategy <str> Comma-separated fallback order.
+                            Default: patch,minor,major
+                            Left-to-right: first matching safe version wins.
+                            patch  = version immediately before latest
+                            minor  = most recently published version of previous minor line
+                            major  = most recently published version of previous major line
+  --show-version            Print resolved version and exit (no execution)
+  --self-update             Check for snpx updates (safe mode, default 24h)
+  --unsafe-self-update      Allow immediate snpx updates without safety window
+
+Environment Variables:
+  SNPX_TIME                 Default for --time
+  SNPX_FALLBACK_STRATEGY    Default for --fallback-strategy
 
 Examples:
   snpx -y cowsay@latest "Hello World"
-  snpx --self-update
-
-Note: Only calls containing @latest are intercepted. Other commands pass through to npx directly.
+  snpx --time 48 --fallback-strategy patch,minor cowsay@latest
+  snpx --show-version cowsay@latest
 `.trim();
 
 /**
- * Parse package specifier from argv
- * Returns { pkgSpec: string|null, pkgName: string|null, restArgs: string[] }
- * Only intercepts specs containing '@latest'
+ * Parse a simple semver string into components.
+ * Returns null for invalid or complex prerelease strings.
  */
-export function parseArgs(argv) {
-  const args = argv.slice(2);
-  let pkgSpec = null;
-  let pkgName = null;
-  let restArgs = [];
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    // Match package@latest pattern (including scoped @scope/pkg@latest)
-    const match = arg.match(/^(@[^/]+\/[^@]+|[^@]+)@latest$/);
-    if (match && !pkgSpec) {
-      pkgSpec = arg;
-      pkgName = match[1];
-    } else {
-      restArgs.push(arg);
-    }
-  }
-
-  return { pkgSpec, pkgName, restArgs };
+export function parseSemver(version) {
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/);
+  if (!match) return null;
+  return {
+    major: parseInt(match[1], 10),
+    minor: parseInt(match[2], 10),
+    patch: parseInt(match[3], 10),
+    prerelease: match[4] || null,
+    build: match[5] || null,
+    raw: version
+  };
 }
 
 /**
- * Read cached version if valid
+ * Parse CLI arguments.
+ * Separates snpx-specific flags from npx passthrough arguments.
+ * Recognizes both @latest specifiers and bare package names.
  */
-export function getCachedVersion(pkgName) {
-  const cacheFile = join(CACHE_DIR, `${pkgName.replace('/', '--')}.json`);
+export function parseArgs(argv) {
+  const args = argv.slice(2);
+  const snpxFlags = {
+    help: false,
+    showVersion: false,
+    selfUpdate: false,
+    unsafeSelfUpdate: false,
+    time: null,
+    fallbackStrategy: null,
+  };
+  const npxArgs = [];
+  let pkgSpec = null;
+  let pkgName = null;
+  let sawFirstPositional = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === '-h' || arg === '--help') {
+      snpxFlags.help = true;
+    } else if (arg === '--show-version') {
+      snpxFlags.showVersion = true;
+    } else if (arg === '--self-update') {
+      snpxFlags.selfUpdate = true;
+    } else if (arg === '--unsafe-self-update') {
+      snpxFlags.unsafeSelfUpdate = true;
+    } else if (arg === '--time') {
+      if (i + 1 >= args.length) throw new Error('Missing value for --time');
+      snpxFlags.time = args[++i];
+    } else if (arg.startsWith('--time=')) {
+      snpxFlags.time = arg.slice('--time='.length);
+    } else if (arg === '--fallback-strategy') {
+      if (i + 1 >= args.length) throw new Error('Missing value for --fallback-strategy');
+      snpxFlags.fallbackStrategy = args[++i];
+    } else if (arg.startsWith('--fallback-strategy=')) {
+      snpxFlags.fallbackStrategy = arg.slice('--fallback-strategy='.length);
+    } else {
+      npxArgs.push(arg);
+      if (!pkgName && !sawFirstPositional) {
+        if (arg.startsWith('-')) {
+          // npx flag; skip for package detection
+        } else {
+          sawFirstPositional = true;
+          const latestMatch = arg.match(/^(@[^/]+\/[^@]+|[^@]+)@latest$/);
+          if (latestMatch) {
+            pkgSpec = arg;
+            pkgName = latestMatch[1];
+          } else {
+            const bareMatch = arg.match(/^(@[^/]+\/[^@]+|[^@]+)$/);
+            if (bareMatch) {
+              pkgSpec = arg;
+              pkgName = bareMatch[1];
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const restArgs = npxArgs.filter(a => a !== pkgSpec);
+  return { snpxFlags, pkgSpec, pkgName, restArgs, isLatest: !!(pkgSpec && pkgSpec.includes('@latest')) };
+}
+
+/**
+ * Read cached version if valid.
+ * Cache TTL now follows the safety window (timeMs).
+ */
+export function getCachedVersion(pkgName, ttlMs = DEFAULT_TIME_HOURS * MS_PER_HOUR) {
+  const cacheFile = join(CACHE_DIR, `${pkgName.replaceAll('/', '--')}.json`);
   if (!existsSync(cacheFile)) return null;
 
   try {
-    const stat = statSync(cacheFile);
-    const age = Date.now() - stat.mtimeMs;
-    if (age > CACHE_TTL_MS) return null;
-
     const data = JSON.parse(readFileSync(cacheFile, 'utf8'));
+    const age = Date.now() - (data.resolvedAt || 0);
+    if (age > ttlMs) return null;
     return data.version;
   } catch {
     return null;
@@ -80,57 +150,113 @@ export function getCachedVersion(pkgName) {
 }
 
 /**
- * Write version to cache
+ * Write version to cache.
  */
 export function setCachedVersion(pkgName, version) {
   mkdirSync(CACHE_DIR, { recursive: true });
-  const cacheFile = join(CACHE_DIR, `${pkgName.replace('/', '--')}.json`);
+  const cacheFile = join(CACHE_DIR, `${pkgName.replaceAll('/', '--')}.json`);
   writeFileSync(cacheFile, JSON.stringify({ version, resolvedAt: Date.now() }));
 }
 
 /**
- * Fetch package metadata from registry
+ * Fetch package metadata from registry.
  */
 export async function fetchPackageMetadata(pkgName) {
   const url = `${REGISTRY}/${encodeURIComponent(pkgName)}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  const res = await fetch(url, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(10000),
+  });
   if (!res.ok) throw new Error(`Failed to fetch ${pkgName}: ${res.status}`);
   return res.json();
 }
 
-/**
- * Find latest-1 version that is at least 1 day old
- */
-export async function resolveSafeVersion(pkgName) {
-  const data = await fetchPackageMetadata(pkgName);
-  const latest = data['dist-tags']?.latest;
-  if (!latest) throw new Error('No latest tag found');
-
-  const times = data.time || {};
-  const versions = Object.entries(times)
+export function buildVersionList(data) {
+  return Object.entries(data.time || {})
     .filter(([v]) => v !== 'created' && v !== 'modified')
     .map(([v, t]) => ({ version: v, time: new Date(t).getTime() }))
-    .sort((a, b) => b.time - a.time); // Descending by time
+    .filter(v => !Number.isNaN(v.time))
+    .sort((a, b) => b.time - a.time);
+}
 
-  // Find index of latest
-  const latestIdx = versions.findIndex(v => v.version === latest);
-  if (latestIdx === -1) throw new Error('Latest version not found in time data');
+export function findPatchFallback(versions, latestVersion) {
+  const idx = versions.findIndex(v => v.version === latestVersion);
+  if (idx === -1 || idx + 1 >= versions.length) return null;
+  return versions[idx + 1];
+}
 
-  // Get previous version (latest-1)
-  const prev = versions[latestIdx + 1];
-  if (!prev) throw new Error('No previous version available');
-
-  // Check age
-  const age = Date.now() - prev.time;
-  if (age < MIN_AGE_MS) {
-    throw new Error(`Previous version ${prev.version} is only ${Math.floor(age / 3600000)}h old, need 24h`);
+export function findMinorFallback(versions, latestParsed) {
+  for (const v of versions) {
+    const p = parseSemver(v.version);
+    if (p && p.major === latestParsed.major && p.minor < latestParsed.minor) {
+      return v;
+    }
   }
+  return null;
+}
 
-  return prev.version;
+export function findMajorFallback(versions, latestParsed) {
+  for (const v of versions) {
+    const p = parseSemver(v.version);
+    if (p && p.major < latestParsed.major) {
+      return v;
+    }
+  }
+  return null;
 }
 
 /**
- * Check if snpx itself has an update available
+ * Resolve a safe version for the package.
+ *
+ * @param {string} pkgName
+ * @param {object} options
+ * @param {number} options.timeMs - Safety window in milliseconds (default: 24h)
+ * @param {string[]} options.strategy - Fallback order, e.g. ['patch','minor','major']
+ */
+export async function resolveSafeVersion(pkgName, options = {}) {
+  const timeMs = options.timeMs ?? DEFAULT_TIME_HOURS * MS_PER_HOUR;
+  const strategy = options.strategy ?? DEFAULT_FALLBACK_STRATEGY.split(',').map(s => s.trim());
+
+  const data = await fetchPackageMetadata(pkgName);
+  const latestVersion = data['dist-tags']?.latest;
+  if (!latestVersion) throw new Error('No latest tag found');
+
+  const latestTimeStr = data.time?.[latestVersion];
+  const latestTime = latestTimeStr ? new Date(latestTimeStr).getTime() : null;
+
+  if (!latestTime) {
+    throw new Error(`Registry did not provide a publish time for ${pkgName}@${latestVersion}. Cannot verify safety window.`);
+  }
+
+  // If latest itself is old enough, use it directly.
+  if ((Date.now() - latestTime) >= timeMs) {
+    return latestVersion;
+  }
+
+  const versions = buildVersionList(data);
+  const latestParsed = parseSemver(latestVersion);
+  if (!latestParsed) throw new Error(`Unable to parse latest version ${latestVersion}`);
+
+  for (const strat of strategy) {
+    let candidate = null;
+    if (strat === 'patch') {
+      candidate = findPatchFallback(versions, latestVersion);
+    } else if (strat === 'minor') {
+      candidate = findMinorFallback(versions, latestParsed);
+    } else if (strat === 'major') {
+      candidate = findMajorFallback(versions, latestParsed);
+    }
+
+    if (candidate && (Date.now() - candidate.time) >= timeMs) {
+      return candidate.version;
+    }
+  }
+
+  throw new Error(`Could not find a safe version for ${pkgName} within strategy [${strategy.join(',')}] and time window ${Math.floor(timeMs / MS_PER_HOUR)}h`);
+}
+
+/**
+ * Check if snpx itself has an update available.
  * Returns { hasUpdate: boolean, currentVersion: string, latestVersion: string|null }
  */
 export async function checkSelfUpdate() {
@@ -149,7 +275,7 @@ export async function checkSelfUpdate() {
 }
 
 /**
- * Run npx with proper exit code handling
+ * Run npx with proper exit code handling.
  */
 function runNpx(args) {
   return new Promise((resolve, reject) => {
@@ -161,24 +287,44 @@ function runNpx(args) {
     child.on('error', reject);
   });
 }
+
+/**
+ * Build effective execution options from CLI flags and environment variables.
+ */
+export function buildOptions(snpxFlags) {
+  const envTime = process.env.SNPX_TIME;
+  const envStrategy = process.env.SNPX_FALLBACK_STRATEGY;
+  const timeHours = snpxFlags.time ?? envTime ?? DEFAULT_TIME_HOURS;
+  const parsedHours = parseFloat(timeHours);
+  if (!Number.isFinite(parsedHours) || parsedHours < 0) {
+    console.error(`[snpx] Invalid --time value: ${timeHours}`);
+    process.exit(1);
+  }
+  const timeMs = parsedHours * MS_PER_HOUR;
+  const strategyStr = snpxFlags.fallbackStrategy ?? envStrategy ?? DEFAULT_FALLBACK_STRATEGY;
+  const strategy = strategyStr.split(',').map(s => s.trim()).filter(Boolean);
+  return { timeHours, timeMs, strategy };
+}
+
 /**
  * Main entry
  */
 async function main() {
-  const args = process.argv.slice(2);
+  const { snpxFlags, pkgSpec, pkgName, restArgs } = parseArgs(process.argv);
 
-  // Handle help
-  if (args.includes('-h') || args.includes('--help')) {
+  if (snpxFlags.help) {
     console.log(HELP_TEXT);
     return;
   }
 
-  // Handle self-update check
-  const selfUpdateIndex = args.findIndex(a => a === '--self-update');
-  const unsafeSelfUpdateIndex = args.findIndex(a => a === '--unsafe-self-update');
+  const { timeHours, timeMs, strategy } = buildOptions(snpxFlags);
 
-  if (selfUpdateIndex !== -1 || unsafeSelfUpdateIndex !== -1) {
-    const unsafe = unsafeSelfUpdateIndex !== -1;
+  // Handle self-update check.
+  const selfUpdate = snpxFlags.selfUpdate;
+  const unsafeSelfUpdate = snpxFlags.unsafeSelfUpdate;
+
+  if (selfUpdate || unsafeSelfUpdate) {
+    const unsafe = unsafeSelfUpdate;
     console.error(`[snpx] Checking for updates${unsafe ? ' (unsafe mode)' : ''}...`);
 
     try {
@@ -194,14 +340,13 @@ async function main() {
         console.error('[snpx] Run: npm update -g @lionad/safe-npx');
 
         if (!unsafe) {
-          // Safe mode: check if latest is 24h old
           const data = await fetchPackageMetadata(PKG_NAME);
           const times = data.time || {};
           const latestTime = times[latestVersion];
           if (latestTime) {
             const age = Date.now() - new Date(latestTime).getTime();
-            if (age < MIN_AGE_MS) {
-              console.error(`[snpx] Warning: Latest version is only ${Math.floor(age / 3600000)}h old. Waiting for 24h safety window.`);
+            if (age < timeMs) {
+              console.error(`[snpx] Warning: Latest version is only ${Math.floor(age / MS_PER_HOUR)}h old. Waiting for ${timeHours}h safety window.`);
               console.error('[snpx] Use --unsafe-self-update to bypass (not recommended)');
             }
           }
@@ -216,24 +361,22 @@ async function main() {
     return;
   }
 
-  // Normal package execution flow
-  const { pkgSpec, pkgName, restArgs } = parseArgs(process.argv);
-
-  // No @latest found, pass through directly
+  // Normal package execution flow.
+  // No package specifier found -> pass through to npx (but strip snpx flags).
   if (!pkgSpec || !pkgName) {
-    await runNpx(args);
+    await runNpx(restArgs);
     return;
   }
 
-  // Check cache first
-  let version = getCachedVersion(pkgName);
+  // Check cache first.
+  let version = getCachedVersion(pkgName, timeMs);
 
   if (!version) {
     console.error(`[snpx] Resolving safe version for ${pkgName}...`);
     try {
-      version = await resolveSafeVersion(pkgName);
+      version = await resolveSafeVersion(pkgName, { timeMs, strategy });
       setCachedVersion(pkgName, version);
-      console.error(`[snpx] Using ${pkgName}@${version} (latest-1, cached for 24h)`);
+      console.error(`[snpx] Using ${pkgName}@${version} (strategy: ${strategy.join(',')}, window: ${timeHours}h)`);
     } catch (err) {
       console.error(`[snpx] Error: ${err.message}`);
       process.exit(1);
@@ -242,7 +385,12 @@ async function main() {
     console.error(`[snpx] Using cached ${pkgName}@${version}`);
   }
 
-  // Replace @latest with @version and spawn npx
+  if (snpxFlags.showVersion) {
+    console.log(version);
+    return;
+  }
+
+  // Replace package specifier with pinned version and spawn npx.
   const npxArgs = [`${pkgName}@${version}`, ...restArgs];
   await runNpx(npxArgs);
 }

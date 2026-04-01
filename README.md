@@ -1,10 +1,10 @@
 # safe-npx (snpx)
 
-Safe npx wrapper - lock to latest-1 version with 24h cache.
+Safe npx wrapper with configurable time-based fallback strategy.
 
 ## Why
 
-`npx -y pkg@latest` installs the bleeding edge. If that version was just compromised in a supply chain attack, you get owned immediately. **snpx** installs the version *before* latest, and only if it's at least 24 hours old. This gives the security community time to catch malicious releases.
+`npx -y pkg@latest` installs the bleeding edge. If that version was just compromised in a supply chain attack, you get owned immediately. **snpx** intercepts `@latest` (and bare package names) and resolves a safe version based on publish age and a configurable fallback strategy. This gives the security community time to catch malicious releases.
 
 ## Install
 
@@ -22,37 +22,56 @@ snpx -y create-react-app@latest my-app
 
 # Works with scoped packages too
 snpx -y @vue/cli@latest create my-project
+
+# Bare package names are also intercepted
+snpx -y cowsay "Hello World"
 ```
 
-### Self-update check
+## How it works
+
+1. Intercepts calls containing `@latest` and bare package names
+2. Queries npm registry for the package
+3. If `latest` is older than the safety window (default 24h), uses `latest`
+4. Otherwise, falls back through the configured strategy:
+   - `patch` = version published immediately before `latest`
+   - `minor` = most recently published version of the previous minor line
+   - `major` = most recently published version of the previous major line
+5. Verifies the fallback version is also older than the safety window
+6. Caches the resolved version for the duration of the safety window
+7. Executes `npx pkg@resolved_version ...`
+
+## Options
 
 ```bash
+# Configure safety window (hours)
+snpx --time 48 cowsay@latest
+
+# Configure fallback strategy (left-to-right precedence)
+snpx --fallback-strategy patch,minor,major cowsay@latest
+
+# Print resolved version without executing
+snpx --show-version cowsay@latest
+
 # Check for snpx updates (safe mode - respects 24h window)
 snpx --self-update
 
-# Bypass safety window (not recommended)
+# Bypass safety window for self-update check (not recommended)
 snpx --unsafe-self-update
 
 # Show help
 snpx --help
 ```
 
-## How it works
+## Environment Variables
 
-1. Intercepts calls containing `@latest`
-2. Queries npm registry for the package
-3. Finds the version published immediately before `latest`
-4. Verifies that version is at least 24 hours old
-5. Caches the resolved version for 24 hours
-6. Executes `npx pkg@resolved_version ...`
-
-Calls without `@latest` are passed through directly to npx.
+- `SNPX_TIME` — Default for `--time`
+- `SNPX_FALLBACK_STRATEGY` — Default for `--fallback-strategy`
 
 ## Cache
 
-Resolved versions are cached in `~/.cache/snpx/` for 24 hours. This means:
+Resolved versions are cached in `~/.cache/snpx/` for the duration of the safety window (default 24 hours). This means:
 - Fast subsequent runs (no registry requests)
-- At most one registry query per package per day
+- At most one registry query per package per window
 
 ## Acknowledgments
 
