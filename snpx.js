@@ -104,12 +104,14 @@ export function parseArgs(argv) {
       snpxFlags.fallbackStrategy = args[++i];
     } else if (arg.startsWith('--fallback-strategy=')) {
       snpxFlags.fallbackStrategy = arg.slice('--fallback-strategy='.length);
+    } else if (arg.startsWith('--')) {
+      throw new Error(`Unknown flag: ${arg}. Run 'snpx --help' for available options.`);
     } else {
       npxArgs.push(arg);
       if (!pkgName && !sawFirstPositional) {
-        if (arg.startsWith('-')) {
-          // npx flag; skip for package detection
-        } else {
+        // Single-dash flags (e.g. -y) skip package detection;
+        // positional args undergo package name matching.
+        if (!arg.startsWith('-')) {
           sawFirstPositional = true;
           const latestMatch = arg.match(/^(@[^/]+\/[^@]+|[^@]+)@latest$/);
           if (latestMatch) {
@@ -263,14 +265,14 @@ export async function checkSelfUpdate() {
   try {
     const data = await fetchPackageMetadata(PKG_NAME);
     const latest = data['dist-tags']?.latest;
-    if (!latest) return { hasUpdate: false, currentVersion: '0.2.0', latestVersion: null };
+    if (!latest) return { hasUpdate: false, currentVersion: '0.2.1', latestVersion: null };
 
-    const currentVersion = '0.2.0'; // Should match package.json
+    const currentVersion = '0.2.1'; // Should match package.json
     const hasUpdate = latest !== currentVersion;
 
     return { hasUpdate, currentVersion, latestVersion: latest };
   } catch {
-    return { hasUpdate: false, currentVersion: '0.2.0', latestVersion: null };
+    return { hasUpdate: false, currentVersion: '0.2.1', latestVersion: null };
   }
 }
 

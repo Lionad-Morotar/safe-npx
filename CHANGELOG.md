@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-04-01
+
+### 安全
+- 未知 `--` 标志不再静默传递给 npx，改为显式报错：`Unknown flag: <arg>. Run 'snpx --help' for available options.`
+- 单短横线标志（如 `-y`）正常透传给 npx
+
+### 测试
+- 新增未知标志报错测试（`--unknown-flag`、`--version`）
+- 新增单短横线标志透传测试
+- 测试总计 46 个
+
 ## [0.2.0] - 2025-04-01
 
 ### 变更

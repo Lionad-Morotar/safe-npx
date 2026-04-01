@@ -174,12 +174,21 @@ describe('snpx', () => {
       expect(result.restArgs).toEqual(['-y', 'create', 'my-app']);
     });
 
-    it('should pass unknown flags through to npxArgs', async () => {
+    it('should throw on unknown --flags', async () => {
       const { parseArgs } = await import('../snpx.js');
-      const result = parseArgs(['node', 'snpx', '--unknown-flag', 'cowsay@latest']);
+      expect(() => parseArgs(['node', 'snpx', '--unknown-flag', 'cowsay@latest'])).toThrow('Unknown flag: --unknown-flag');
+    });
 
-      expect(result.restArgs).toEqual(['--unknown-flag']);
-      expect(result.snpxFlags.help).toBe(false);
+    it('should throw on --version (not a snpx flag)', async () => {
+      const { parseArgs } = await import('../snpx.js');
+      expect(() => parseArgs(['node', 'snpx', '--version'])).toThrow('Unknown flag: --version');
+    });
+
+    it('should pass single-dash flags through to npxArgs', async () => {
+      const { parseArgs } = await import('../snpx.js');
+      const result = parseArgs(['node', 'snpx', '-y', 'cowsay@latest']);
+      expect(result.restArgs).toEqual(['-y']);
+      expect(result.pkgName).toBe('cowsay');
     });
   });
 
