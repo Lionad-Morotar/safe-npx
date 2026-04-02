@@ -5,7 +5,3 @@ node_modules/
 
 # Build outputs
 dist/
-
-# Compiled binaries (add manually for releases)
-/snpx
-/snpx-*

@@ -4,19 +4,16 @@
   "description": "Safe npx wrapper - lock to latest-1 version with 24h cache",
   "type": "module",
   "bin": {
-    "snpx": "snpx"
+    "snpx": "dist/index.js"
   },
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "files": [
-    "snpx"
+    "dist/"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "vite build",
     "test": "vitest run",
-    "prepublishOnly": "npm run build",
-    "bundle": "bun build src/index.ts --compile --outfile snpx",
-    "bundle:all": "bun build src/index.ts --compile --target=bun-darwin-arm64 --outfile snpx-darwin-arm64 && bun build src/index.ts --compile --target=bun-darwin-x64 --outfile snpx-darwin-x64 && bun build src/index.ts --compile --target=bun-linux-x64 --outfile snpx-linux-x64 && bun build src/index.ts --compile --target=bun-windows-x64 --outfile snpx-windows-x64.exe"
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "npx",
@@ -34,6 +31,7 @@
     "@types/node": "^25.5.0",
     "@types/semver": "^7.7.1",
     "typescript": "^5.4.0",
+    "vite": "^8.0.3",
     "vitest": "^1.6.0"
   },
   "dependencies": {
