@@ -4,9 +4,23 @@
  */
 
 import { spawn } from 'child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import semver from 'semver';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Dynamic version from package.json
+let VERSION;
+try {
+  const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
+  VERSION = pkg.version;
+} catch {
+  VERSION = '0.2.3'; // Fallback
+}
 
 const CACHE_DIR = join(homedir(), '.cache', 'snpx');
 const REGISTRY = 'https://registry.npmjs.org';
@@ -42,6 +56,7 @@ ${_c.bold('Options:')}
                             ${_c.dim('minor')}  = most recently published version of previous minor line
                             ${_c.dim('major')}  = most recently published version of previous major line
   ${_c.yellow('--show-version')}            Print resolved version and exit (no execution)
+  ${_c.yellow('--version')}                 Print snpx version and exit
   ${_c.yellow('--self-update')}             Check for snpx updates (safe mode, default 24h)
   ${_c.yellow('--unsafe-self-update')}      Allow immediate snpx updates without safety window
 
@@ -83,10 +98,109 @@ export function parseSemver(version) {
  *   snpx [snpx-flags] <package> [tool-args...]
  *   snpx [snpx-flags]                (--help, --self-update, etc.)
  */
+/**
+ * Determine if snpx should intercept version resolution based on package spec.
+ * - Exact version (1.5.0) → do not intercept (user knows what they're doing)
+ * - Range (^1.0.0, >=1.5) → intercept (uncertainty needs protection)
+ * - latest → intercept
+ * - No version → intercept
+ */
+export function shouldIntercept(pkgSpec) {
+  if (!pkgSpec) return false;
+
+  // Handle scoped packages (@scope/name@version)
+  let versionPart;
+  if (pkgSpec.startsWith('@')) {
+    // Find second '@' for scoped packages
+    const secondAt = pkgSpec.indexOf('@', 1);
+    versionPart = secondAt === -1 ? null : pkgSpec.slice(secondAt + 1);
+  } else {
+    // Find first '@' for regular packages
+    const atIndex = pkgSpec.indexOf('@');
+    versionPart = atIndex === -1 ? null : pkgSpec.slice(atIndex + 1);
+  }
+
+  // No version specified → intercept
+  if (!versionPart) return true;
+
+  // @latest → intercept
+  if (versionPart === 'latest') return true;
+
+  // Exact version → do NOT intercept
+  if (semver.valid(versionPart)) return false;
+
+  // Range version (^, ~, >, <, etc.) → intercept
+  if (semver.validRange(versionPart)) return true;
+
+  // Unknown format → intercept (safe default)
+  return true;
+}
+
+/**
+ * Extract package name from spec.
+ * @example 'cowsay@1.5.0' → 'cowsay'
+ * @example '@vue/cli@latest' → '@vue/cli'
+ */
+export function extractPackageName(pkgSpec) {
+  if (!pkgSpec) return null;
+
+  // Scoped package: @scope/name@version
+  if (pkgSpec.startsWith('@')) {
+    const secondAt = pkgSpec.indexOf('@', 1);
+    return secondAt === -1 ? pkgSpec : pkgSpec.slice(0, secondAt);
+  }
+
+  // Regular package: name@version
+  const atIndex = pkgSpec.indexOf('@');
+  return atIndex === -1 ? pkgSpec : pkgSpec.slice(0, atIndex);
+}
+
+/**
+ * Parse CLI arguments using two-phase parsing:
+ *
+ *   Phase 1 (before package): Only snpx flags accepted.
+ *     Unknown --flags → error. Single-dash flags (-y) → npx passthrough.
+ *   Phase 2 (after package): Everything is passthrough to the executed tool.
+ *
+ *   snpx [snpx-flags] [--] <package> [tool-args...]
+ *   snpx [snpx-flags]                (--help, --self-update, etc.)
+ */
+// npx flags that must come BEFORE the package name
+// These are recognized by snpx and positioned correctly when constructing the npx command
+const NPX_PREFIX_FLAGS = new Set([
+  // Installation control (boolean flags)
+  '-y', '--yes',
+  '--no',
+  '--no-save',
+  '--legacy-peer-deps',
+  '--force',
+  // Execution mode (boolean flags)
+  '--call', '-c',
+  // Cache strategy (boolean flags)
+  '--offline',
+  '--prefer-offline',
+  '--prefer-online',
+  // Workspaces (boolean flags)
+  '--workspaces', '--ws',
+  '--include-workspace-root',
+  // Output control (boolean flags)
+  '--silent', '--quiet', '-q',
+]);
+
+// npx flags that take a value and must come BEFORE the package name
+const NPX_PREFIX_FLAGS_WITH_VALUE = new Set([
+  '-p', '--package',
+  '-w', '--workspace',
+  '--script-shell',
+  '--loglevel',
+  '--registry',
+]);
+
 export function parseArgs(argv) {
   const args = argv.slice(2);
   const snpxFlags = {
     help: false,
+    version: false,
     showVersion: false,
     selfUpdate: false,
     unsafeSelfUpdate: false,
@@ -95,8 +209,10 @@ export function parseArgs(argv) {
   };
   let pkgSpec = null;
   let pkgName = null;
-  const restArgs = [];
+  const npxPrefixArgs = [];  // npx flags that go BEFORE package (e.g., -y)
+  const restArgs = [];       // args that go AFTER package
   let foundPackage = false;
+  let endOfOptions = false;  // Tracks if we've seen '--'
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -107,9 +223,25 @@ export function parseArgs(argv) {
       continue;
     }
 
+    // End-of-options marker: stop parsing flags, next arg is package
+    if (arg === '--' && !endOfOptions) {
+      endOfOptions = true;
+      continue;
+    }
+
+    // After '--', all arguments are positional (no flag parsing)
+    if (endOfOptions) {
+      pkgSpec = arg;
+      pkgName = extractPackageName(arg);
+      foundPackage = true;
+      continue;
+    }
+
     // Phase 1: before package, only known snpx flags accepted
     if (arg === '-h' || arg === '--help') {
       snpxFlags.help = true;
+    } else if (arg === '--version') {
+      snpxFlags.version = true;
     } else if (arg === '--show-version') {
       snpxFlags.showVersion = true;
     } else if (arg === '--self-update') {
@@ -126,35 +258,38 @@ export function parseArgs(argv) {
       snpxFlags.fallbackStrategy = args[++i];
     } else if (arg.startsWith('--fallback-strategy=')) {
       snpxFlags.fallbackStrategy = arg.slice('--fallback-strategy='.length);
+    } else if (NPX_PREFIX_FLAGS.has(arg)) {
+      // Known npx boolean flags (--offline, --silent, etc.) go before package
+      npxPrefixArgs.push(arg);
+    } else if (NPX_PREFIX_FLAGS_WITH_VALUE.has(arg)) {
+      // npx flags that take a value (e.g., -p pkg, -w name)
+      if (i + 1 >= args.length) throw new Error(`Missing value for ${arg}`);
+      npxPrefixArgs.push(arg, args[++i]);
+    } else if (arg.startsWith('--package=') || arg.startsWith('--workspace=') || arg.startsWith('--loglevel=') || arg.startsWith('--registry=') || arg.startsWith('--script-shell=')) {
+      // npx --flag=value syntax
+      npxPrefixArgs.push(arg);
     } else if (arg.startsWith('--')) {
       throw new Error(`Unknown flag: ${arg}. Run 'snpx --help' for available options.`);
     } else if (arg.startsWith('-')) {
-      // Single-dash npx flags (e.g. -y, -p) are always passthrough
-      restArgs.push(arg);
-    } else {
-      // Positional: check if it's a package name
-      const latestMatch = arg.match(/^(@[^/]+\/[^@]+|[^@]+)@latest$/);
-      if (latestMatch) {
-        pkgSpec = arg;
-        pkgName = latestMatch[1];
-        foundPackage = true;
+      // Single-dash flags: check if it's an npx prefix flag
+      if (NPX_PREFIX_FLAGS.has(arg)) {
+        npxPrefixArgs.push(arg);
+      } else if (NPX_PREFIX_FLAGS_WITH_VALUE.has(arg)) {
+        if (i + 1 >= args.length) throw new Error(`Missing value for ${arg}`);
+        npxPrefixArgs.push(arg, args[++i]);
       } else {
-        const bareMatch = arg.match(/^(@[^/]+\/[^@]+|[^@]+)$/);
-        if (bareMatch) {
-          pkgSpec = arg;
-          pkgName = bareMatch[1];
-          foundPackage = true;
-        } else {
-          // Not a recognized package spec (e.g. pkg@1.0.0).
-          // Stop phase 1; treat this and everything after as npx passthrough.
-          foundPackage = true;
-          restArgs.push(arg);
-        }
+        // Unknown single-dash flag: treat as tool arg (goes after package)
+        restArgs.push(arg);
       }
+    } else {
+      // Positional argument: treat as package name
+      pkgSpec = arg;
+      pkgName = extractPackageName(arg);
+      foundPackage = true;
     }
   }
 
-  return { snpxFlags, pkgSpec, pkgName, restArgs, isLatest: !!(pkgSpec && pkgSpec.includes('@latest')) };
+  return { snpxFlags, pkgSpec, pkgName, npxPrefixArgs, restArgs, isLatest: !!(pkgSpec && pkgSpec.includes('@latest')) };
 }
 
 /**
@@ -176,25 +311,46 @@ export function getCachedVersion(pkgName, ttlMs = DEFAULT_TIME_HOURS * MS_PER_HO
 }
 
 /**
- * Write version to cache.
+ * Write version to cache atomically to prevent corruption during concurrent writes.
  */
 export function setCachedVersion(pkgName, version) {
   mkdirSync(CACHE_DIR, { recursive: true });
   const cacheFile = join(CACHE_DIR, `${pkgName.replaceAll('/', '--')}.json`);
-  writeFileSync(cacheFile, JSON.stringify({ version, resolvedAt: Date.now() }));
+  const tmpFile = `${cacheFile}.${process.pid}.${Date.now()}.tmp`;
+
+  // Atomic write: write to temp file, then rename
+  writeFileSync(tmpFile, JSON.stringify({ version, resolvedAt: Date.now() }));
+  renameSync(tmpFile, cacheFile);
 }
 
 /**
- * Fetch package metadata from registry.
+ * Fetch package metadata from registry with retry logic.
  */
-export async function fetchPackageMetadata(pkgName) {
-  const url = `${REGISTRY}/${encodeURIComponent(pkgName)}`;
-  const res = await fetch(url, {
-    headers: { accept: 'application/json' },
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) throw new Error(`Failed to fetch ${pkgName}: ${res.status}`);
-  return res.json();
+export async function fetchPackageMetadata(pkgName, options = {}) {
+  const maxRetries = options.maxRetries ?? 3;
+  const baseDelay = options.baseDelay ?? 1000;
+  const maxDelay = options.maxDelay ?? 10000;
+  const timeout = options.timeout ?? 10000;
+
+  let lastError;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const url = `${REGISTRY}/${encodeURIComponent(pkgName)}`;
+      const res = await fetch(url, {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(timeout),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries - 1) {
+        const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  throw new Error(`Failed after ${maxRetries} attempts: ${lastError.message}`);
 }
 
 export function buildVersionList(data) {
@@ -289,14 +445,13 @@ export async function checkSelfUpdate() {
   try {
     const data = await fetchPackageMetadata(PKG_NAME);
     const latest = data['dist-tags']?.latest;
-    if (!latest) return { hasUpdate: false, currentVersion: '0.2.3', latestVersion: null };
+    if (!latest) return { hasUpdate: false, currentVersion: VERSION, latestVersion: null };
 
-    const currentVersion = '0.2.3'; // Should match package.json
-    const hasUpdate = latest !== currentVersion;
+    const hasUpdate = latest !== VERSION;
 
-    return { hasUpdate, currentVersion, latestVersion: latest };
+    return { hasUpdate, currentVersion: VERSION, latestVersion: latest };
   } catch {
-    return { hasUpdate: false, currentVersion: '0.2.3', latestVersion: null };
+    return { hasUpdate: false, currentVersion: VERSION, latestVersion: null };
   }
 }
 
@@ -336,10 +491,15 @@ export function buildOptions(snpxFlags) {
  * Main entry
  */
 async function main() {
-  const { snpxFlags, pkgSpec, pkgName, restArgs } = parseArgs(process.argv);
+  const { snpxFlags, pkgSpec, pkgName, npxPrefixArgs, restArgs } = parseArgs(process.argv);
 
   if (snpxFlags.help) {
     console.log(HELP_TEXT);
+    return;
+  }
+
+  if (snpxFlags.version) {
+    console.log(VERSION);
     return;
   }
 
@@ -390,7 +550,17 @@ async function main() {
   // Normal package execution flow.
   // No package specifier found -> pass through to npx (but strip snpx flags).
   if (!pkgSpec || !pkgName) {
-    await runNpx(restArgs);
+    await runNpx([...npxPrefixArgs, ...restArgs]);
+    return;
+  }
+
+  // Determine if we should intercept version resolution
+  const needsInterception = shouldIntercept(pkgSpec);
+
+  if (!needsInterception) {
+    // Exact version specified - pass through to npx directly
+    // User knows exactly what they want
+    await runNpx([...npxPrefixArgs, pkgSpec, ...restArgs]);
     return;
   }
 
@@ -417,7 +587,8 @@ async function main() {
   }
 
   // Replace package specifier with pinned version and spawn npx.
-  const npxArgs = [`${pkgName}@${version}`, ...restArgs];
+  // npxPrefixArgs (like -y) must come before the package
+  const npxArgs = [...npxPrefixArgs, `${pkgName}@${version}`, ...restArgs];
   await runNpx(npxArgs);
 }
 

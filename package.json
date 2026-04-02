@@ -6,8 +6,10 @@
   "bin": {
     "snpx": "snpx.js"
   },
+  "types": "types/snpx.d.ts",
   "files": [
-    "snpx.js"
+    "snpx.js",
+    "types/"
   ],
   "scripts": {
     "test": "vitest run"
@@ -25,6 +27,10 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "@types/semver": "^7.7.1",
     "vitest": "^1.6.0"
+  },
+  "dependencies": {
+    "semver": "^7.7.4"
   }
 }

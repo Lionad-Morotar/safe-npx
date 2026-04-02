@@ -76,13 +76,13 @@ describe('snpx', () => {
       expect(result.isLatest).toBe(true);
     });
 
-    it('should return null for non-latest packages', async () => {
+    it('should parse exact version packages but mark as non-latest', async () => {
       const { parseArgs } = await import('../snpx.js');
       const result = parseArgs(['node', 'snpx', 'cowsay@1.0.0', 'hello']);
 
-      expect(result.pkgSpec).toBeNull();
-      expect(result.pkgName).toBeNull();
-      expect(result.restArgs).toEqual(['cowsay@1.0.0', 'hello']);
+      expect(result.pkgSpec).toBe('cowsay@1.0.0');
+      expect(result.pkgName).toBe('cowsay');
+      expect(result.restArgs).toEqual(['hello']);
       expect(result.isLatest).toBe(false);
     });
 
@@ -92,7 +92,8 @@ describe('snpx', () => {
 
       expect(result.pkgSpec).toBe('cowsay@latest');
       expect(result.pkgName).toBe('cowsay');
-      expect(result.restArgs).toEqual(['-y', 'hello']);
+      expect(result.npxPrefixArgs).toEqual(['-y']);
+      expect(result.restArgs).toEqual(['hello']);
     });
 
     it('should parse bare package name', async () => {
@@ -101,7 +102,8 @@ describe('snpx', () => {
 
       expect(result.pkgSpec).toBe('cowsay');
       expect(result.pkgName).toBe('cowsay');
-      expect(result.restArgs).toEqual(['-y', 'hello']);
+      expect(result.npxPrefixArgs).toEqual(['-y']);
+      expect(result.restArgs).toEqual(['hello']);
       expect(result.isLatest).toBe(false);
     });
 
@@ -134,7 +136,8 @@ describe('snpx', () => {
       const { parseArgs } = await import('../snpx.js');
       const result = parseArgs(['node', 'snpx', '--time', '48', '--fallback-strategy', 'patch,minor', '-y', 'cowsay@latest', 'hello']);
 
-      expect(result.restArgs).toEqual(['-y', 'hello']);
+      expect(result.npxPrefixArgs).toEqual(['-y']);
+      expect(result.restArgs).toEqual(['hello']);
       expect(result.snpxFlags.time).toBe('48');
       expect(result.snpxFlags.fallbackStrategy).toBe('patch,minor');
     });
@@ -171,7 +174,8 @@ describe('snpx', () => {
 
       expect(result.pkgSpec).toBe('@vue/cli');
       expect(result.pkgName).toBe('@vue/cli');
-      expect(result.restArgs).toEqual(['-y', 'create', 'my-app']);
+      expect(result.npxPrefixArgs).toEqual(['-y']);
+      expect(result.restArgs).toEqual(['create', 'my-app']);
     });
 
     it('should throw on unknown --flags', async () => {
@@ -179,10 +183,15 @@ describe('snpx', () => {
       expect(() => parseArgs(['node', 'snpx', '--unknown-flag', 'cowsay@latest'])).toThrow('Unknown flag: --unknown-flag');
     });
 
-    it('should throw on --version before package', async () => {
+    it('should parse --version flag', async () => {
       const { parseArgs } = await import('../snpx.js');
-      expect(() => parseArgs(['node', 'snpx', '--version'])).toThrow('Unknown flag: --version');
-      expect(() => parseArgs(['node', 'snpx', '--version', 'cowsay@latest'])).toThrow('Unknown flag: --version');
+      const result1 = parseArgs(['node', 'snpx', '--version']);
+      expect(result1.snpxFlags.version).toBe(true);
+      expect(result1.pkgName).toBeNull();
+
+      const result2 = parseArgs(['node', 'snpx', '--version', 'cowsay@latest']);
+      expect(result2.snpxFlags.version).toBe(true);
+      expect(result2.pkgName).toBe('cowsay');
     });
 
     it('should pass --version through when after package name (two-phase)', async () => {
@@ -199,19 +208,97 @@ describe('snpx', () => {
       expect(result.restArgs).toEqual(['--version', '--json', '-l']);
     });
 
-    it('should passthrough non-latest versioned packages', async () => {
-      const { parseArgs } = await import('../snpx.js');
+    it('should parse exact version packages for interception decision', async () => {
+      const { parseArgs, shouldIntercept } = await import('../snpx.js');
       const result = parseArgs(['node', 'snpx', 'cowsay@1.0.0', 'hello']);
-      expect(result.pkgSpec).toBeNull();
-      expect(result.pkgName).toBeNull();
-      expect(result.restArgs).toEqual(['cowsay@1.0.0', 'hello']);
+      expect(result.pkgSpec).toBe('cowsay@1.0.0');
+      expect(result.pkgName).toBe('cowsay');
+      expect(result.restArgs).toEqual(['hello']);
+      // Exact versions should NOT be intercepted
+      expect(shouldIntercept(result.pkgSpec!)).toBe(false);
     });
 
-    it('should pass single-dash flags through to npxArgs', async () => {
+    it('should pass single-dash npx flags to npxPrefixArgs', async () => {
       const { parseArgs } = await import('../snpx.js');
       const result = parseArgs(['node', 'snpx', '-y', 'cowsay@latest']);
-      expect(result.restArgs).toEqual(['-y']);
+      expect(result.npxPrefixArgs).toEqual(['-y']);
+      expect(result.restArgs).toEqual([]);
       expect(result.pkgName).toBe('cowsay');
+    });
+
+    it('should handle -- separator correctly', async () => {
+      const { parseArgs } = await import('../snpx.js');
+      const result = parseArgs(['node', 'snpx', '-y', '--', 'cowsay', 'hello']);
+      expect(result.pkgName).toBe('cowsay');
+      expect(result.npxPrefixArgs).toEqual(['-y']);
+      expect(result.restArgs).toEqual(['hello']);
+    });
+
+    it('should treat everything after -- as passthrough', async () => {
+      const { parseArgs } = await import('../snpx.js');
+      const result = parseArgs(['node', 'snpx', '--', '--help', '--version']);
+      expect(result.pkgName).toBe('--help');
+      expect(result.restArgs).toEqual(['--version']);
+    });
+  });
+
+  describe('shouldIntercept', () => {
+    it('should NOT intercept exact versions', async () => {
+      const { shouldIntercept } = await import('../snpx.js');
+      expect(shouldIntercept('cowsay@1.5.0')).toBe(false);
+      expect(shouldIntercept('cowsay@0.0.0')).toBe(false);
+      expect(shouldIntercept('@vue/cli@4.5.0')).toBe(false);
+    });
+
+    it('should intercept latest', async () => {
+      const { shouldIntercept } = await import('../snpx.js');
+      expect(shouldIntercept('cowsay@latest')).toBe(true);
+      expect(shouldIntercept('@vue/cli@latest')).toBe(true);
+    });
+
+    it('should intercept range versions', async () => {
+      const { shouldIntercept } = await import('../snpx.js');
+      expect(shouldIntercept('cowsay@^1.0.0')).toBe(true);
+      expect(shouldIntercept('cowsay@~1.0.0')).toBe(true);
+      expect(shouldIntercept('cowsay@>=1.5.0')).toBe(true);
+      expect(shouldIntercept('cowsay@>1.0.0 <2.0.0')).toBe(true);
+      expect(shouldIntercept('cowsay@1.x')).toBe(true);
+    });
+
+    it('should intercept bare package names', async () => {
+      const { shouldIntercept } = await import('../snpx.js');
+      expect(shouldIntercept('cowsay')).toBe(true);
+      expect(shouldIntercept('@vue/cli')).toBe(true);
+    });
+
+    it('should handle falsy values', async () => {
+      const { shouldIntercept } = await import('../snpx.js');
+      expect(shouldIntercept('')).toBe(false);
+      expect(shouldIntercept(null as any)).toBe(false);
+      expect(shouldIntercept(undefined as any)).toBe(false);
+    });
+  });
+
+  describe('extractPackageName', () => {
+    it('should extract name from simple packages', async () => {
+      const { extractPackageName } = await import('../snpx.js');
+      expect(extractPackageName('cowsay')).toBe('cowsay');
+      expect(extractPackageName('cowsay@1.5.0')).toBe('cowsay');
+      expect(extractPackageName('cowsay@latest')).toBe('cowsay');
+    });
+
+    it('should extract name from scoped packages', async () => {
+      const { extractPackageName } = await import('../snpx.js');
+      expect(extractPackageName('@vue/cli')).toBe('@vue/cli');
+      expect(extractPackageName('@vue/cli@4.5.0')).toBe('@vue/cli');
+      expect(extractPackageName('@vue/cli@latest')).toBe('@vue/cli');
+    });
+
+    it('should handle falsy values', async () => {
+      const { extractPackageName } = await import('../snpx.js');
+      expect(extractPackageName('')).toBeNull();
+      expect(extractPackageName(null as any)).toBeNull();
+      expect(extractPackageName(undefined as any)).toBeNull();
     });
   });
 
