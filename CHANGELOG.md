@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.3.0] - 2025-04-02
+
+### 变更
+- TypeScript 重构：将单文件 snpx.js 拆分为模块化架构
+- 使用 Vite 打包为单个 `dist/index.js` (~72KB)
+
+### 修复
+- 扩展 npx 前缀标志白名单，修复 `snpx -y package` 解析错误
+
+### 开发
+- 测试架构重构：按模块拆分为 4 个测试文件（60 个测试全部通过）
+- 添加 `vite.config.ts` 构建配置
+- 更新 `tsconfig.json` 关闭 declaration 和 sourceMap
+- 清理过时设计文档
+
 ## [0.2.3] - 2025-04-02
 
 ### 变更
