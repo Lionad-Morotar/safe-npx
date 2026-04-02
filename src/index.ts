@@ -130,7 +130,7 @@ async function main(): Promise<void> {
 
   // Replace package specifier with pinned version and spawn npx.
   // npxPrefixArgs (like -y) must come before the package
-  const npxArgs = [`${pkgName}@${version}`, ...restArgs];
+  const npxArgs = [...npxPrefixArgs, `${pkgName}@${version}`, ...restArgs];
   await runNpx(npxArgs);
 }
 
