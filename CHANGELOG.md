@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2025-04-02
+
+### 修复
+- 修复 npx 前缀标志（如 `-y`, `--yes`）未正确传递给 npx 命令的问题
+- 添加 12 个 E2E 测试覆盖 npx 标志传递场景
+
 ## [0.3.0] - 2025-04-02
 
 ### 变更
