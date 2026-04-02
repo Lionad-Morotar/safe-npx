@@ -2,3 +2,10 @@ node_modules/
 *.log
 .DS_Store
 .remember
+
+# Build outputs
+dist/
+
+# Compiled binaries (add manually for releases)
+/snpx
+/snpx-*
