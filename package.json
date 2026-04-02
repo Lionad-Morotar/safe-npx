@@ -4,15 +4,17 @@
   "description": "Safe npx wrapper - lock to latest-1 version with 24h cache",
   "type": "module",
   "bin": {
-    "snpx": "snpx.js"
+    "snpx": "dist/index.js"
   },
-  "types": "types/snpx.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "files": [
-    "snpx.js",
-    "types/"
+    "dist/"
   ],
   "scripts": {
-    "test": "vitest run"
+    "build": "tsc",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "npx",
@@ -27,7 +29,9 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "@types/semver": "^7.7.1",
+    "typescript": "^5.4.0",
     "vitest": "^1.6.0"
   },
   "dependencies": {
