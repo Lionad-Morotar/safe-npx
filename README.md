@@ -11,6 +11,15 @@
 
 `npx -y pkg@latest` 会直接安装最新版本。如果该版本刚被供应链攻击（Supply Chain Attack）篡改，你会立即中招。**snpx** 会拦截 `@latest`、裸包名以及版本范围，根据发布时间和可配置的回退策略（Fallback Strategy）解析出一个安全版本。这为安全社区争取了发现和处置恶意发布的时间窗口。
 
+**BEST PRACTICE: update to the latest npm for native protection.**
+
+npm v11.10.0+ 原生支持 `min-release-age`，可全局防护所有 npm/npx 调用：
+
+```bash
+npm install -g npm@latest
+echo "min-release-age=7" >> ~/.npmrc
+```
+
 ## Install / 安装
 
 ```bash
