@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-04 [YANKED]
+
+### Deprecated
+
+- **项目已归档** - npm v11.10.0+ 已原生支持 `min-release-age` 配置，提供相同的供应链攻击防护
+
+### Migration / 迁移指南
+
+```bash
+# 卸载 snpx
+npm uninstall -g @lionad/safe-npx
+
+# 升级 npm 到最新版本
+npm install -g npm@latest
+
+# 配置全局安全窗口 (单位：小时)
+echo "min-release-age=7" >> ~/.npmrc
+
+# CI 环境中使用环境变量
+# NPM_CONFIG_MIN_RELEASE_AGE=7
+```
+
+### Acknowledgments
+
+snpx 完成了它的历史使命——在 npm 添加原生支持之前提供了保护和意识。感谢所有用户。
+
 ## [0.3.1] - 2025-04-02
 
 ### 修复

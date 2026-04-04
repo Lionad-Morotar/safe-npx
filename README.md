@@ -5,7 +5,35 @@
    <br>
 </center>
 
-## Why / 为什么需要
+## ⚠️ Archived / 项目已归档
+
+**This project is archived as of April 2026.**
+
+npm v11.10.0+ now provides native protection via `min-release-age` configuration.
+
+**项目已于 2026 年 4 月归档。**
+
+npm v11.10.0+ 已原生支持 `min-release-age` 配置，提供相同的供应链攻击防护。
+
+### Migration / 迁移指南
+
+```bash
+# Uninstall snpx / 卸载 snpx
+npm uninstall -g @lionad/safe-npx
+
+# Upgrade npm to latest / 升级 npm 到最新版本
+npm install -g npm@latest
+
+# Configure global safety window (in hours) / 配置全局安全窗口（单位：小时）
+echo "min-release-age=7" >> ~/.npmrc
+
+# In CI environments / CI 环境中
+# Set NPM_CONFIG_MIN_RELEASE_AGE=7
+```
+
+---
+
+## Why / 为什么需要 (历史背景)
 
 `npx -y pkg@latest` installs the bleeding edge. If that version was just compromised in a supply chain attack, you get owned immediately. **snpx** intercepts `@latest`, bare package names, and version ranges — resolving a safe version based on publish age and a configurable fallback strategy. This gives the security community time to catch malicious releases.
 
