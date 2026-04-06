@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { parseArgs, buildOptions, extractPackageName } from '../src/cli.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { parseArgs, buildOptions, extractPackageName, createLogger } from '../src/cli.js';
 
 describe('cli', () => {
   const originalEnv = process.env;
@@ -100,6 +100,30 @@ describe('cli', () => {
       expect(result.pkgName).toBe('cowsay');
     });
 
+    it('should default silent to true', () => {
+      const result = parseArgs(['node', 'snpx', 'cowsay@latest']);
+      expect(result.snpxFlags.silent).toBe(true);
+      expect(result.snpxFlags.verbose).toBe(false);
+    });
+
+    it('should keep silent true with --silent flag', () => {
+      const result = parseArgs(['node', 'snpx', '--silent', 'cowsay@latest']);
+      expect(result.snpxFlags.silent).toBe(true);
+      expect(result.snpxFlags.verbose).toBe(false);
+    });
+
+    it('should set silent false with --verbose flag', () => {
+      const result = parseArgs(['node', 'snpx', '--verbose', 'cowsay@latest']);
+      expect(result.snpxFlags.silent).toBe(false);
+      expect(result.snpxFlags.verbose).toBe(true);
+    });
+
+    it('should not pass --silent to npxPrefixArgs', () => {
+      const result = parseArgs(['node', 'snpx', '-y', '--silent', 'cowsay@latest']);
+      expect(result.npxPrefixArgs).toEqual(['-y']);
+      expect(result.snpxFlags.silent).toBe(true);
+    });
+
     it('should ignore snpx flags in restArgs', () => {
       const result = parseArgs(['node', 'snpx', '--time', '48', '--fallback-strategy', 'patch,minor', '-y', 'cowsay@latest', 'hello']);
 
@@ -189,19 +213,45 @@ describe('cli', () => {
 
   describe('buildOptions', () => {
     it('should apply defaults', () => {
-      expect(buildOptions({})).toEqual({ timeHours: 24, timeMs: 24 * 60 * 60 * 1000, strategy: ['patch', 'minor', 'major'] });
+      expect(buildOptions({})).toEqual({ timeHours: 24, timeMs: 24 * 60 * 60 * 1000, strategy: ['patch', 'minor', 'major'], silent: true });
     });
 
     it('should prefer CLI flags over env vars', () => {
       process.env.SNPX_TIME = '72';
       process.env.SNPX_FALLBACK_STRATEGY = 'major';
-      expect(buildOptions({ time: '48', fallbackStrategy: 'patch' })).toEqual({ timeHours: '48', timeMs: 48 * 60 * 60 * 1000, strategy: ['patch'] });
+      expect(buildOptions({ time: '48', fallbackStrategy: 'patch' })).toEqual({ timeHours: '48', timeMs: 48 * 60 * 60 * 1000, strategy: ['patch'], silent: true });
     });
 
     it('should fall back to env vars', () => {
       process.env.SNPX_TIME = '12';
       process.env.SNPX_FALLBACK_STRATEGY = 'minor,patch';
-      expect(buildOptions({})).toEqual({ timeHours: '12', timeMs: 12 * 60 * 60 * 1000, strategy: ['minor', 'patch'] });
+      expect(buildOptions({})).toEqual({ timeHours: '12', timeMs: 12 * 60 * 60 * 1000, strategy: ['minor', 'patch'], silent: true });
+    });
+
+    it('should respect --verbose flag', () => {
+      expect(buildOptions({ verbose: true })).toEqual({ timeHours: 24, timeMs: 24 * 60 * 60 * 1000, strategy: ['patch', 'minor', 'major'], silent: false });
+    });
+
+    it('should respect explicit --silent flag', () => {
+      expect(buildOptions({ silent: true })).toEqual({ timeHours: 24, timeMs: 24 * 60 * 60 * 1000, strategy: ['patch', 'minor', 'major'], silent: true });
+    });
+  });
+
+  describe('createLogger', () => {
+    it('should write info messages to stderr when not silent', () => {
+      const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logger = createLogger(false);
+      logger.info('[snpx] hello');
+      expect(stderrSpy).toHaveBeenCalledWith('[snpx] hello');
+      stderrSpy.mockRestore();
+    });
+
+    it('should suppress info messages when silent', () => {
+      const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logger = createLogger(true);
+      logger.info('[snpx] hidden');
+      expect(stderrSpy).not.toHaveBeenCalled();
+      stderrSpy.mockRestore();
     });
   });
 });

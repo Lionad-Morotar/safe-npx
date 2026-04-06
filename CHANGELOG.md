@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-06
+
+### 新增
+
+- `--silent` 和 `--verbose` 标志控制 snpx 内部日志输出
+- 默认启用 silent 模式，stdout 不再被 `[snpx] Resolving...` 等日志污染，提升对 MCP server 等下游依赖的兼容性
+- 新增 `createLogger` 抽象层，统一日志输出到 stderr
+
+### 变更
+
+- `--silent` 从 npx 白名单移除，改由 snpx 自身独占解析（npx 的 `--quiet` / `-q` 仍可正常透传）
+- 帮助文本新增 `--silent` / `--verbose` 说明
+
+### 修复
+
+- 修复 `runNpx` 在 npx 子进程被信号终止时错误返回 exit code 0 的问题
+- 修复 E2E 测试中 `stderr` 断言与本地 npmrc 环境耦合导致的稳定失败
+- 修复多处 stale comment
+
+### 测试
+
+- 新增 silent/verbose 模式的单元测试和 E2E 测试（35 个单元测试 + 15 个 E2E 测试全部通过）
+- 为 `createLogger` 补充直接单元测试
+
 ## [0.4.0] - 2026-04-04 [YANKED]
 
 ### Deprecated

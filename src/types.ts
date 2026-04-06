@@ -17,6 +17,8 @@ export interface SnpxFlags {
   showVersion: boolean;
   selfUpdate: boolean;
   unsafeSelfUpdate: boolean;
+  silent: boolean;
+  verbose: boolean;
   time: string | null;
   fallbackStrategy: string | null;
 }
@@ -57,4 +59,5 @@ export interface CliOptions {
   timeHours: string | number;
   timeMs: number;
   strategy: string[];
+  silent: boolean;
 }

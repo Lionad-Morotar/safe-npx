@@ -86,7 +86,8 @@ snpx 使用**包名前/后**来区分不同层级的参数：
 | 类别 | 支持的参数 | 说明 |
 |------|-----------|------|
 | **snpx 专属** | `--help`, `--version`, `--show-version`<br>`--time`, `--fallback-strategy`<br>`--self-update`, `--unsafe-self-update` | snpx 的配置选项 |
-| **npx 白名单** | `-y`, `--yes`, `--no`<br>`-p <pkg>`, `--package=<pkg>`<br>`-c <cmd>`, `--call=<cmd>`<br>`--offline`, `--prefer-offline`<br>`-w <name>`, `--workspace=<name>`<br>`--silent`, `--quiet`, `--registry=<url>` | 传递给 npx 的前置参数 |
+| **npx 白名单** | `-y`, `--yes`, `--no`<br>`-p <pkg>`, `--package=<pkg>`<br>`-c <cmd>`, `--call=<cmd>`<br>`--offline`, `--prefer-offline`<br>`-w <name>`, `--workspace=<name>`<br>`--quiet`, `--registry=<url>` | 传递给 npx 的前置参数 |
+| **snpx 日志** | `--verbose` | 显示 snpx 内部日志（默认静默） |
 
 **After package / 包名之后**（全部透传给被执行的工具）：
 
@@ -156,7 +157,16 @@ snpx --help
 
 # Use -- to prevent tool flags from being parsed as snpx flags / 使用 -- 防止工具参数被误解析为 snpx 标志
 snpx -- cowsay --help
+
+# Show snpx internal logs / 显示 snpx 内部日志
+snpx --verbose cowsay@latest
 ```
+
+### Default Silent Mode / 默认静默模式
+
+**By default, snpx runs silently.** It only prints `--help`, `--version`, and `--show-version` to stdout, plus errors to stderr. No `[snpx] Resolving...` logs are emitted unless you pass `--verbose`. This ensures stdout remains clean for downstream consumers like MCP servers.
+
+**默认情况下，snpx 以静默模式运行。** 只有 `--help`、`--version`、`--show-version` 会输出到 stdout，错误输出到 stderr。除非传入 `--verbose`，否则不会打印 `[snpx] Resolving...` 等内部日志。这保证了对 MCP server 等下游依赖的 stdout 不产生污染。
 
 ## Environment Variables / 环境变量
 

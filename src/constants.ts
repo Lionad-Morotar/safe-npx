@@ -56,6 +56,8 @@ ${colors.bold('Options:')}
                             ${colors.dim('major')}  = most recently published version of previous major line
   ${colors.yellow('--show-version')}            Print resolved version and exit (no execution)
   ${colors.yellow('--version')}                 Print snpx version and exit
+  ${colors.yellow('--silent')}                  Suppress snpx info logs (default)
+  ${colors.yellow('--verbose')}                 Show snpx info logs
   ${colors.yellow('--self-update')}             Check for snpx updates (safe mode, default 24h)
   ${colors.yellow('--unsafe-self-update')}      Allow immediate snpx updates without safety window
 
@@ -83,7 +85,7 @@ export const NPX_PREFIX_FLAGS = new Set([
   '--prefer-online',
   '--workspaces', '--ws',
   '--include-workspace-root',
-  '--silent', '--quiet', '-q',
+  '--quiet', '-q',
 ]);
 
 // npx flags that take a value and must come BEFORE the package name

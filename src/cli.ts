@@ -8,6 +8,22 @@ import {
 } from './constants.js';
 import type { ParsedArgs, SnpxFlags, CliOptions } from './types.js';
 
+export interface Logger {
+  info: (msg: string) => void;
+}
+
+/**
+ * Create a logger that suppresses info-level output when silent is true.
+ * Info messages are written to stderr to avoid polluting stdout.
+ */
+export function createLogger(silent: boolean): Logger {
+  return {
+    info: (msg: string) => {
+      if (!silent) console.error(msg);
+    },
+  };
+}
+
 /**
  * Extract package name from spec.
  * @example 'cowsay@1.5.0' → 'cowsay'
@@ -45,6 +61,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     showVersion: false,
     selfUpdate: false,
     unsafeSelfUpdate: false,
+    silent: true,
+    verbose: false,
     time: null,
     fallbackStrategy: null,
   };
@@ -87,6 +105,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
       snpxFlags.showVersion = true;
     } else if (arg === '--self-update') {
       snpxFlags.selfUpdate = true;
+    } else if (arg === '--silent') {
+      snpxFlags.silent = true;
+    } else if (arg === '--verbose') {
+      snpxFlags.silent = false;
+      snpxFlags.verbose = true;
     } else if (arg === '--unsafe-self-update') {
       snpxFlags.unsafeSelfUpdate = true;
     } else if (arg === '--time') {
@@ -100,7 +123,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else if (arg.startsWith('--fallback-strategy=')) {
       snpxFlags.fallbackStrategy = arg.slice('--fallback-strategy='.length);
     } else if (NPX_PREFIX_FLAGS.has(arg)) {
-      // Known npx boolean flags (--offline, --silent, etc.) go before package
+      // Known npx boolean flags (--offline, --quiet, etc.) go before package
       npxPrefixArgs.push(arg);
     } else if (NPX_PREFIX_FLAGS_WITH_VALUE.has(arg)) {
       // npx flags that take a value (e.g., -p pkg, -w name)
@@ -155,7 +178,8 @@ export function buildOptions(snpxFlags: Partial<SnpxFlags>): CliOptions {
   const timeMs = parsedHours * MS_PER_HOUR;
   const strategyStr = snpxFlags.fallbackStrategy ?? envStrategy ?? DEFAULT_FALLBACK_STRATEGY;
   const strategy = strategyStr.split(',').map((s) => s.trim()).filter(Boolean);
-  return { timeHours, timeMs, strategy };
+  const silent = snpxFlags.verbose ? false : (snpxFlags.silent ?? true);
+  return { timeHours, timeMs, strategy, silent };
 }
 
 export { HELP_TEXT };

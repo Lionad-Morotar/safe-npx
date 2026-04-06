@@ -4,7 +4,8 @@
  */
 
 import { spawn } from 'child_process';
-import { parseArgs, buildOptions, HELP_TEXT } from './cli.js';
+import { constants as osConstants } from 'os';
+import { parseArgs, buildOptions, HELP_TEXT, createLogger } from './cli.js';
 import { shouldIntercept, resolveSafeVersion, checkSelfUpdate } from './version.js';
 import { getCachedVersion, setCachedVersion } from './cache.js';
 import { VERSION, MS_PER_HOUR } from './constants.js';
@@ -15,8 +16,12 @@ import { VERSION, MS_PER_HOUR } from './constants.js';
 function runNpx(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn('npx', args, { stdio: 'inherit' });
-    child.on('close', (code) => {
-      process.exitCode = code ?? 0;
+    child.on('close', (code, signal) => {
+      if (signal) {
+        process.exitCode = 128 + (osConstants.signals[signal] || 0);
+      } else {
+        process.exitCode = code ?? 0;
+      }
       resolve();
     });
     child.on('error', reject);
@@ -39,7 +44,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { timeHours, timeMs, strategy } = buildOptions(snpxFlags);
+  const { timeHours, timeMs, strategy, silent } = buildOptions(snpxFlags);
+  const logger = createLogger(silent);
 
   // Handle self-update check.
   const selfUpdate = snpxFlags.selfUpdate;
@@ -47,7 +53,7 @@ async function main(): Promise<void> {
 
   if (selfUpdate || unsafeSelfUpdate) {
     const unsafe = unsafeSelfUpdate;
-    console.error(`[snpx] Checking for updates${unsafe ? ' (unsafe mode)' : ''}...`);
+    logger.info(`[snpx] Checking for updates${unsafe ? ' (unsafe mode)' : ''}...`);
 
     try {
       const { hasUpdate, currentVersion, latestVersion } = await checkSelfUpdate();
@@ -58,27 +64,26 @@ async function main(): Promise<void> {
       }
 
       if (hasUpdate) {
-        console.error(`[snpx] Update available: ${currentVersion} → ${latestVersion}`);
-        console.error('[snpx] Run: npm update -g @lionad/safe-npx');
+        logger.info(`[snpx] Update available: ${currentVersion} → ${latestVersion}`);
+        logger.info('[snpx] Run: npm update -g @lionad/safe-npx');
 
         if (!unsafe) {
           const { fetchPackageMetadata } = await import('./registry.js');
-          const { REGISTRY } = await import('./constants.js');
           const data = await fetchPackageMetadata('@lionad/safe-npx');
           const times = data.time || {};
           const latestTime = times[latestVersion];
           if (latestTime) {
             const age = Date.now() - new Date(latestTime).getTime();
             if (age < timeMs) {
-              console.error(
+              logger.info(
                 `[snpx] Warning: Latest version is only ${Math.floor(age / MS_PER_HOUR)}h old. Waiting for ${timeHours}h safety window.`
               );
-              console.error('[snpx] Use --unsafe-self-update to bypass (not recommended)');
+              logger.info('[snpx] Use --unsafe-self-update to bypass (not recommended)');
             }
           }
         }
       } else {
-        console.error(`[snpx] Already up to date (${currentVersion})`);
+        logger.info(`[snpx] Already up to date (${currentVersion})`);
       }
     } catch (err) {
       console.error(`[snpx] Error checking for updates: ${(err as Error).message}`);
@@ -108,11 +113,11 @@ async function main(): Promise<void> {
   let version = getCachedVersion(pkgName, timeMs);
 
   if (!version) {
-    console.error(`[snpx] Resolving safe version for ${pkgName}...`);
+    logger.info(`[snpx] Resolving safe version for ${pkgName}...`);
     try {
       version = await resolveSafeVersion(pkgName, { timeMs, strategy });
       setCachedVersion(pkgName, version);
-      console.error(
+      logger.info(
         `[snpx] Using ${pkgName}@${version} (strategy: ${strategy.join(',')}, window: ${timeHours}h)`
       );
     } catch (err) {
@@ -120,7 +125,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
   } else {
-    console.error(`[snpx] Using cached ${pkgName}@${version}`);
+    logger.info(`[snpx] Using cached ${pkgName}@${version}`);
   }
 
   if (snpxFlags.showVersion) {
