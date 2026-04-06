@@ -28,6 +28,7 @@ describe('e2e', () => {
       const child = spawn('node', ['dist/index.js', ...args], {
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout,
+        env: { ...process.env, SNPX_SKIP_NPX_CHECK: '1' },
       });
 
       let stdout = '';

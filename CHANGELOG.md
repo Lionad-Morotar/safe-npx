@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-04-06
+
+### 变更
+
+- 检测到 npx >= 11.10.0 时直接拒绝运行并输出迁移提示，避免 snpx 与 npm 原生 `min-release-age` 冲突
+- 新增 `checkNpxVersion` 模块和 `SNPX_SKIP_NPX_CHECK` 测试绕过开关
+
+### 测试
+
+- 新增 `test/npx-check.test.ts`（11 个测试），覆盖版本检测和退出逻辑
+- E2E 测试统一注入 `SNPX_SKIP_NPX_CHECK=1` 以在本地 npm 11.12.1 环境下通过
+
 ## [0.5.0] - 2026-04-06
 
 ### 新增

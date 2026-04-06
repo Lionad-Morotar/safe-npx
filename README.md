@@ -11,9 +11,11 @@
 
 npm v11.10.0+ now provides native protection via `min-release-age` configuration.
 
+**snpx v0.5.1+ will refuse to run** if it detects `npx >= 11.10.0`, because npm's native `min-release-age` makes snpx redundant and can conflict with it.
+
 **项目已于 2026 年 4 月归档。**
 
-npm v11.10.0+ 已原生支持 `min-release-age` 配置，提供相同的供应链攻击防护。
+npm v11.10.0+ 已原生支持 `min-release-age` 配置，提供相同的供应链攻击防护。snpx v0.5.1+ 检测到 npx >= 11.10.0 时会拒绝继续运行，因为 npm 原生功能已取代 snpx，两者混用可能产生冲突。
 
 ### Migration / 迁移指南
 

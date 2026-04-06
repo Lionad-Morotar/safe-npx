@@ -6,6 +6,7 @@
 import { spawn } from 'child_process';
 import { constants as osConstants } from 'os';
 import { parseArgs, buildOptions, HELP_TEXT, createLogger } from './cli.js';
+import { checkNpxVersion } from './npx-check.js';
 import { shouldIntercept, resolveSafeVersion, checkSelfUpdate } from './version.js';
 import { getCachedVersion, setCachedVersion } from './cache.js';
 import { VERSION, MS_PER_HOUR } from './constants.js';
@@ -32,6 +33,8 @@ function runNpx(args: string[]): Promise<void> {
  * Main entry
  */
 async function main(): Promise<void> {
+  await checkNpxVersion();
+
   const { snpxFlags, pkgSpec, pkgName, npxPrefixArgs, restArgs } = parseArgs(process.argv);
 
   if (snpxFlags.help) {
